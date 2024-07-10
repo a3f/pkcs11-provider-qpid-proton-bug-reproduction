@@ -1,6 +1,8 @@
 D=$(PWD)/build/out
 
-all: provider proton
+all: test
+test: provider proton
+	./runtest.sh
 
 provider:
 	git submodule update --init pkcs11-provider
