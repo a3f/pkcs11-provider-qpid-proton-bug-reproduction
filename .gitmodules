@@ -1,0 +1,6 @@
+[submodule "qpid-proton"]
+	path = qpid-proton
+	url = https://github.com/apache/qpid-proton
+[submodule "pkcs11-provider"]
+	path = pkcs11-provider
+	url = https://github.com/latchset/pkcs11-provider
