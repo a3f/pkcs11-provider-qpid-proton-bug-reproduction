@@ -1,0 +1,146 @@
+From ed9833de4452e8c25b980b0c18e1d4fc0b39b3ad Mon Sep 17 00:00:00 2001
+From: Ahmad Fatoum <a.fatoum@pengutronix.de>
+Date: Mon, 8 Jul 2024 10:02:09 +0200
+Subject: [PATCH] HACK: PROTON-2594: cpp: connect_config_test: adapt for
+ testing PKCS#11 URIs
+
+The test hardcodes paths to PEM files. For easily testing PKCS#11 usage
+for client certificates on the target, it's convenient to be able to override
+the file paths without recompilation. Enable doing that by consulting a
+set of new environment variables (TEST_CERT, TEST_KEY, TEST_CA,
+TEST_VERIFY) and falling back to the hardcoded paths for the undefined
+variables.
+
+As this is a test, this is currently not installed, so add a special
+install step, just for this one test.
+---
+ cpp/CMakeLists.txt              |  2 +-
+ cpp/src/connect_config_test.cpp | 48 ++++++++++++++++++++++++++-------
+ cpp/tests.cmake                 |  7 +++++
+ 3 files changed, 46 insertions(+), 11 deletions(-)
+
+diff --git a/cpp/CMakeLists.txt b/cpp/CMakeLists.txt
+index c65cc8723b41..52cb0f971489 100644
+--- a/cpp/CMakeLists.txt
++++ b/cpp/CMakeLists.txt
+@@ -38,7 +38,7 @@ list(APPEND PLATFORM_LIBS Threads::Threads)
+ include(versions.cmake)
+ 
+ # Check for JSON-CPP support for connection configuration
+-find_package(JsonCpp)
++find_package(JsonCpp REQUIRED)
+ option(ENABLE_JSONCPP "Use jsoncpp parser for connection configuration" ${JsonCpp_FOUND})
+ if (ENABLE_JSONCPP)
+   include_directories(${JsonCpp_INCLUDE_DIRS})
+diff --git a/cpp/src/connect_config_test.cpp b/cpp/src/connect_config_test.cpp
+index 80c0372d249f..216cf550eb17 100644
+--- a/cpp/src/connect_config_test.cpp
++++ b/cpp/src/connect_config_test.cpp
+@@ -347,6 +347,11 @@ class test_tls_default_fail : public test_handler {
+     }
+ };
+ 
++static const char *test_cert = "testdata/certs/client-certificate.pem",
++             *test_key = "testdata/certs/client-private-key-no-password.pem",
++             *test_ca = "testdata/certs/ca-certificate.pem",
++             *test_verify = "true";
++
+ class test_tls_external : public test_handler {
+ 
+     static connection_options make_opts() {
+@@ -366,14 +371,20 @@ class test_tls_external : public test_handler {
+     test_tls_external() : test_handler(make_opts()) {}
+ 
+     void on_listener_start(container& c) override {
+-        connect(c, RAW_STRING(
++        static char buf[1024];
++
++        snprintf(buf, sizeof(buf), RAW_STRING(
+                     "scheme":"amqps",
+                     "sasl":{ "mechanisms": "EXTERNAL" },
+                     "tls": {
+-                            "cert":"testdata/certs/client-certificate.pem",
+-                            "key":"testdata/certs/client-private-key-no-password.pem",
+-                            "ca":"testdata/certs/ca-certificate.pem",
+-                            "verify":true }));
++                            "cert":"%s",
++                            "key": "%s",
++                            "ca":"%s",
++                            "verify":%s }),
++            test_cert, test_key, test_ca, test_verify
++        );
++
++        connect(c, buf);
+     }
+ };
+ 
+@@ -396,19 +407,31 @@ class test_tls_plain : public test_handler {
+     test_tls_plain() : test_handler(make_opts()) {}
+ 
+     void on_listener_start(container& c) override {
+-        connect(c, RAW_STRING(
++        static char buf[1024];
++
++        snprintf(buf, sizeof(buf), RAW_STRING(
+                     "scheme":"amqps", "user":"user@proton", "password": "password",
+                     "sasl":{ "mechanisms": "PLAIN" },
+                     "tls": {
+-                            "cert":"testdata/certs/client-certificate.pem",
+-                            "key":"testdata/certs/client-private-key-no-password.pem",
+-                            "ca":"testdata/certs/ca-certificate.pem",
+-                            "verify":true }));
++                            "cert":"%s",
++                            "key": "%s",
++                            "ca":"%s",
++                            "verify":%s }),
++            test_cert, test_key, test_ca, test_verify
++        );
++
++        connect(c, buf);
+     }
+ };
+ 
+ } // namespace
+ 
++static void getenv_nonempty(const char *envvar, const char **out)
++{
++  const char *val = getenv(envvar);
++  if (val && *val)
++    *out = val;
++}
+ 
+ int main(int argc, char** argv) {
+     int failed = 0;
+@@ -422,6 +445,11 @@ int main(int argc, char** argv) {
+     bool have_sasl = pn_sasl_extended() && getenv("PN_SASL_CONFIG_PATH");
+     pn_ssl_domain_t *have_ssl = pn_ssl_domain(PN_SSL_MODE_SERVER);
+ 
++    getenv_nonempty("TEST_CERT", &test_cert);
++    getenv_nonempty("TEST_KEY", &test_key);
++    getenv_nonempty("TEST_CA", &test_ca);
++    getenv_nonempty("TEST_VERIFY", &test_verify);
++
+     if (have_sasl) {
+         RUN_ARGV_TEST(failed, test_host_user_pass().run());
+     }
+diff --git a/cpp/tests.cmake b/cpp/tests.cmake
+index 8c63c24b655e..9d90b065b2ba 100644
+--- a/cpp/tests.cmake
++++ b/cpp/tests.cmake
+@@ -69,6 +69,13 @@ if (ENABLE_JSONCPP)
+   set_tests_properties(cpp-connect_config_test PROPERTIES WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+   # Test data and output directories for connect_config_test
+   file(COPY  "${CMAKE_CURRENT_SOURCE_DIR}/testdata" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
++
++  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/connect_config_test"
++       DESTINATION "${PROTON_SHARE}/tests/"
++       PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_READ WORLD_EXECUTE)
++
++     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/testdata"
++          DESTINATION "${PROTON_SHARE}/tests/")
+ endif()
+ 
+ if (ENABLE_OPENTELEMETRYCPP)
+-- 
+2.39.2
+
