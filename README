@@ -1,0 +1,25 @@
+This repository shows how to reproduce a potential bug in pkcs11-provider
+exposed by trying to use it in one of qpid-proton's test programs.
+
+To trigger the issue:
+
+  git clone --recursive https://github.com/a3f/pkcs11-provider-qpid-proton-bug-reproduction
+  cd pkcs11-provider-qpid-proton-bug-reproduction
+
+  make test
+
+This will end with following error message:
+
+  unexpected error amqp:connection:framing-error: SSL Failure:
+  error:40800060:pkcs11::The specified key handle is not valid
+
+To workaround the issue, run:
+
+  LOAD_BEHAVIOR=early make test
+
+which will add `pkcs11-module-load-behavior = early` into the openssl config.
+
+This was tested on Debian Bookworm with OpenSSL 3.0.13 and SoftHSM 2.6.1.
+It's expected that all build dependencies are installed beforehand.
+If not, hopefully the build will abort with a more or less descriptive error
+message...
